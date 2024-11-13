@@ -1520,6 +1520,9 @@ class FullBottomSheet @JvmOverloads constructor(
             if (lyric.translationContent.isNotEmpty()) {
                 with(holder.transitionFrame) {
                     visibility = VISIBLE
+                    translationY = 0f
+                    pivotX = if (currentLyricHasMultiSpeaker) width / 1f else 0f
+                    pivotY = height / 2f
                     val paddingStart = 12.5f
                     val paddingEnd = if (hasMultiSpeaker) 66.5f else 12.5f
                     updatePaddingRelative(
@@ -1552,6 +1555,10 @@ class FullBottomSheet @JvmOverloads constructor(
                         JustifyContent.FLEX_END
                     else
                         JustifyContent.FLEX_START
+
+                translationY = 0f
+                pivotX = if (currentLyricHasMultiSpeaker) width / 1f else 0f
+                pivotY = height / 2f
 
                 val paddingTop =
                     if (lyric.timeStamp != null) 18
@@ -1586,13 +1593,15 @@ class FullBottomSheet @JvmOverloads constructor(
 
                     // Add new views after check
                     var wordIndex = 0
-                    var lyricDurationStart: Long = 0
                     lyric.wordTimestamps.forEach {
                         val lyricContent = lyric.content.substring(wordIndex, it.first)
-                        val lyricTextView = CustomTextView(context).apply {
+                        val lyricTextView = CustomTextView(
+                            context = context,
+                            colors = intArrayOf(Color.WHITE, Color.WHITE, Color.WHITE, Color.WHITE, 0x24FFFFFF)
+                        ).apply {
                             text = lyricContent
-                            setTag(R.id.lyric_duration_start, lyricDurationStart)
-                            setTag(R.id.lyric_duration_end, it.second)
+                            setTag(R.id.lyric_duration_start, it.second)
+                            setTag(R.id.lyric_duration_end, it.third)
                             setTag(R.id.lyric_duration_hash, it.hashCode())
                             setTag(R.id.lyric_content_hash, lyric.content.hashCode())
 
@@ -1604,13 +1613,11 @@ class FullBottomSheet @JvmOverloads constructor(
                                 if (lyric.timeStamp != null) 0f else extraLineHeight.toFloat(),
                                 1f
                             )
-                            scaleText(LYRIC_DEFAULT_SIZE)
                         }
                         if (lyric.wordTimestamps.size != childCount) {
                             addView(lyricTextView)
                         }
                         wordIndex = it.first
-                        lyricDurationStart = it.second
                     }
                 } else {
                     // Remove old views
@@ -1633,7 +1640,6 @@ class FullBottomSheet @JvmOverloads constructor(
                                 if (lyric.timeStamp != null) 0f else extraLineHeight.toFloat(),
                                 1f
                             )
-                            scaleText(LYRIC_DEFAULT_SIZE)
                         }
                     )
                 }
@@ -1641,13 +1647,8 @@ class FullBottomSheet @JvmOverloads constructor(
                 children.getTextViews {
                     with(it) {
                         visibility = if (lyric.content.isNotEmpty()) VISIBLE else GONE
-                        translationY = 0f
-
-                        pivotX = 0f
-                        pivotY = height / 2f
 
                         if (lyric.timeStamp == null) {
-                            scaleText(sizeFactor)
                             if (it !is CustomTextView) {
                                 setTextColor(disabledTextColor)
                             }
@@ -1716,16 +1717,20 @@ class FullBottomSheet @JvmOverloads constructor(
         }
 
         override fun onViewRecycled(holder: ViewHolder) {
+            with(holder.lyricFlexboxLayout) {
+                translationY = 0f
+                scaleText(LYRIC_DEFAULT_SIZE)
+            }
             holder.lyricFlexboxLayout.children.getTextViews {
-                it.translationY = 0f
-                it.scaleText(LYRIC_DEFAULT_SIZE)
                 if (it !is CustomTextView) {
                     it.setTextColor(defaultTextColor)
                 }
             }
-            holder.transitionFrame.scaleText(LYRIC_DEFAULT_SIZE)
-            with(holder.transitionTextView) {
+            with(holder.transitionFrame) {
                 translationY = 0f
+                scaleText(LYRIC_DEFAULT_SIZE)
+            }
+            with(holder.transitionTextView) {
                 setTextColor(defaultTextColor)
             }
             holder.blurRadius = 0F
@@ -1883,20 +1888,6 @@ class FullBottomSheet @JvmOverloads constructor(
         }
     }
 
-    private fun updateNewIndex(): Int {
-        val filteredList = bottomSheetFullLyricList.filterIndexed { _, lyric ->
-            (lyric.timeStamp ?: 0) <= (instance?.currentPosition ?: 0)
-        }
-
-        return if (filteredList.isNotEmpty()) {
-            filteredList.indices.maxBy {
-                (filteredList[it].timeStamp ?: 0)
-            }
-        } else {
-            -1
-        }
-    }
-
     private class PlaylistCardMoveCallback(
         private val touchHelperContract: (Int, Int) -> Unit
     ) : ItemTouchHelper.Callback() {
@@ -1928,6 +1919,20 @@ class FullBottomSheet @JvmOverloads constructor(
 
         override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
             throw IllegalStateException()
+        }
+    }
+
+    private fun updateNewIndex(): Int {
+        val filteredList = bottomSheetFullLyricList.filterIndexed { _, lyric ->
+            (lyric.timeStamp ?: 0) <= (instance?.currentPosition ?: 0)
+        }
+
+        return if (filteredList.isNotEmpty()) {
+            filteredList.indices.maxBy {
+                (filteredList[it].timeStamp ?: 0)
+            }
+        } else {
+            -1
         }
     }
 
@@ -2050,32 +2055,35 @@ class FullBottomSheet @JvmOverloads constructor(
         val durationStep = (LYRIC_SCROLL_DURATION * 0.1).toLong()
         val lyricFlexboxLayout = view.findViewById<FlexboxLayout>(R.id.lyric_flexbox)
         val translationFrame = view.findViewById<LinearLayout>(R.id.translation_frame)
-        val translationTextView = view.findViewById<TextView>(R.id.transition_text)
         val animator = ValueAnimator.ofFloat(0f, depth)
         animator.setDuration(duration)
         animator.interpolator = inComingInterpolator
         animator.addUpdateListener {
             val value = it.animatedValue as Float
-            lyricFlexboxLayout.children.getTextViews { it.translationY = value }
-            translationTextView.translationY = value
+            lyricFlexboxLayout.translationY = value
+            translationFrame.translationY = value
         }
         animator.doOnEnd {
-            lyricFlexboxLayout.children.getTextViews { it.translationY = depth }
-            translationTextView.translationY = depth
+            lyricFlexboxLayout.translationY = depth
+            translationFrame.translationY = depth
 
             val animator1 = ObjectAnimator.ofFloat(depth, 0f)
             animator1.setDuration(durationReturn + ii * durationStep)
             animator1.interpolator = liftInterpolator
             animator1.addUpdateListener {
                 val value = it.animatedValue as Float
-                lyricFlexboxLayout.children.getTextViews { it.translationY = value }
-                translationTextView.translationY = value
+                lyricFlexboxLayout.translationY = value
+                translationFrame.translationY = value
             }
             animator1.doOnEnd {
-                lyricFlexboxLayout.children.getTextViews { it.translationY = 0f }
-                lyricFlexboxLayout.scaleText(LYRIC_DEFAULT_SIZE)
-                translationTextView.translationY = 0f
-                translationFrame.scaleText(LYRIC_DEFAULT_SIZE)
+                with(lyricFlexboxLayout) {
+                    translationY = 0f
+                    scaleText(LYRIC_DEFAULT_SIZE)
+                }
+                with(translationFrame) {
+                    translationY = 0f
+                    scaleText(LYRIC_DEFAULT_SIZE)
+                }
             }
             animator1.start()
         }
@@ -2119,7 +2127,6 @@ class FullBottomSheet @JvmOverloads constructor(
         )
         bottomSheetFullLyricAdapter.updateHighlight(0)
         bottomSheetFullLyricAdapter.notifyItemChanged(0)
-        bottomSheetFullLyricAdapter.notifyItemChanged(1)
     }
 
     inner class VolumeChangeReceiver : BroadcastReceiver() {
